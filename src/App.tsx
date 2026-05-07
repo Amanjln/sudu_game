@@ -1,101 +1,140 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Board } from './components/Board';
-import { generatePuzzle, isValid, checkWin, type Grid } from './utils/sudoku';
+import { useEffect } from 'react';
+import './App.css';
+import { Scene3D } from './components/3d/Scene3D';
+import { Board } from './components/ui/Board';
+import { NumberPad } from './components/ui/NumberPad';
+import { Controls } from './components/ui/Controls';
+import { Timer } from './components/ui/Timer';
+import { StatsPanel } from './components/ui/StatsPanel';
+import { VictoryModal } from './components/ui/VictoryModal';
+import { useGameStore } from './store/gameStore';
 
 function App() {
-  const [grid, setGrid] = useState<Grid>([]);
-  const [initialGrid, setInitialGrid] = useState<Grid>([]);
-  const [selectedCell, setSelectedCell] = useState<[number, number] | null>(null);
-  const [gameWon, setGameWon] = useState(false);
+  const {
+    grid, selectedCell, initialGrid, gameWon, isSolving, isPaused,
+    mistakeCount, theme,
+    startNewGame, selectCell, enterNumber, undo, redo,
+    toggleNoteMode, toggleTheme, resumeGame,
+  } = useGameStore();
 
-  const startNewGame = useCallback(() => {
-    const { puzzle } = generatePuzzle();
-    setInitialGrid(puzzle.map(r => [...r]));
-    setGrid(puzzle.map(r => [...r]));
-    setSelectedCell(null);
-    setGameWon(false);
-  }, []);
+  /* ── Bootstrap ──────────────────────────────── */
+  useEffect(() => { startNewGame('easy'); }, []);
 
+  /* ── Apply theme class to <html> ─────────────── */
   useEffect(() => {
-    startNewGame();
-  }, [startNewGame]);
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
 
-  const handleChange = (row: number, col: number, val: number | null) => {
-    if (gameWon) return;
-    const newGrid = grid.map(r => [...r]);
-    newGrid[row][col] = val;
-    setGrid(newGrid);
-
-    if (checkWin(newGrid)) {
-      setGameWon(true);
-    }
-  };
-
-  const errors = grid.map((row, rIdx) => 
-    row.map((val, cIdx) => {
-      if (val === null) return false;
-      const newGrid = grid.map(r => [...r]);
-      newGrid[rIdx][cIdx] = null; // Temporarily remove to check valid
-      return !isValid(newGrid, rIdx, cIdx, val);
-    })
-  );
-
+  /* ── Global keyboard handler ──────────────────── */
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (!selectedCell || gameWon) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (gameWon || isSolving) return;
+
+      if (e.ctrlKey && e.key === 'z') { e.preventDefault(); undo(); return; }
+      if (e.ctrlKey && (e.key === 'y' || (e.shiftKey && e.key === 'Z'))) { e.preventDefault(); redo(); return; }
+      if (e.key === 'n' || e.key === 'N') { toggleNoteMode(); return; }
+
+      if (!selectedCell) return;
       const [r, c] = selectedCell;
-      if (e.key === "Backspace" || e.key === "Delete") {
-        if (initialGrid[r][c] === null) handleChange(r, c, null);
-      } else if (/^[1-9]$/.test(e.key)) {
-        if (initialGrid[r][c] === null) handleChange(r, c, parseInt(e.key, 10));
-      } else if (e.key === "ArrowUp" && r > 0) {
-        setSelectedCell([r - 1, c]);
-      } else if (e.key === "ArrowDown" && r < 8) {
-        setSelectedCell([r + 1, c]);
-      } else if (e.key === "ArrowLeft" && c > 0) {
-        setSelectedCell([r, c - 1]);
-      } else if (e.key === "ArrowRight" && c < 8) {
-        setSelectedCell([r, c + 1]);
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedCell, grid, initialGrid, gameWon]);
 
-  if (grid.length === 0) return <div className="loading">Loading...</div>;
+      if (/^[1-9]$/.test(e.key)) {
+        if (initialGrid[r]?.[c] === null) enterNumber(parseInt(e.key));
+      } else if (e.key === 'Backspace' || e.key === 'Delete' || e.key === '0') {
+        if (initialGrid[r]?.[c] === null) enterNumber(null);
+      } else if (e.key === 'ArrowUp'    && r > 0) selectCell(r - 1, c);
+      else if (e.key === 'ArrowDown'  && r < 8) selectCell(r + 1, c);
+      else if (e.key === 'ArrowLeft'  && c > 0) selectCell(r, c - 1);
+      else if (e.key === 'ArrowRight' && c < 8) selectCell(r, c + 1);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedCell, grid, initialGrid, gameWon, isSolving, enterNumber, selectCell, undo, redo, toggleNoteMode]);
+
+  if (!grid.length) {
+    return (
+      <div style={{
+        minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontFamily: 'Orbitron, monospace', color: '#00f5ff', fontSize: '1.2rem', letterSpacing: '0.1em',
+      }}>
+        Initializing…
+      </div>
+    );
+  }
 
   return (
-    <div className="app-container">
-      <header className="header">
-        <h1>Sudoku</h1>
-        <p>Fill the 9×9 grid with numbers 1-9 so each row, column, and 3×3 box has no repeats.</p>
-      </header>
-      
-      <main className="main-content">
-        <Board 
-          grid={grid}
-          initialGrid={initialGrid}
-          selectedCell={selectedCell}
-          errors={errors}
-          onChange={handleChange}
-          onSelect={(r, c) => setSelectedCell([r, c])}
-        />
-        
-        <div className="controls">
-          <button className="btn-primary" onClick={startNewGame}>New Game</button>
-        </div>
+    <>
+      {/* ── 3D Background Canvas ──────────────────── */}
+      <Scene3D />
 
-        {gameWon && (
-          <div className="victory-overlay">
-            <div className="victory-modal">
-              <h2>Congratulations!</h2>
-              <p>You have successfully solved the puzzle.</p>
-              <button className="btn-primary" onClick={startNewGame}>Play Again</button>
+      {/* ── Glassmorphism Game Panel ──────────────── */}
+      <div className="app-wrapper">
+        <div className="game-panel">
+
+          {/* Header */}
+          <header className="game-header">
+            <h1 className="game-logo">SUDOKU 3D</h1>
+
+            <div className="header-right">
+              <Timer />
+
+              {/* Mistakes */}
+              <div className="mistake-counter">
+                {[0, 1, 2].map(i => (
+                  <span
+                    key={i}
+                    className={`mistake-dot ${mistakeCount > i ? '' : 'empty'}`}
+                  />
+                ))}
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  {mistakeCount} mistake{mistakeCount !== 1 ? 's' : ''}
+                </span>
+              </div>
+
+              <button className="theme-btn" onClick={toggleTheme} title="Toggle Theme">
+                {theme === 'dark' ? '☀️' : '🌙'}
+              </button>
+
+              <StatsPanel />
             </div>
-          </div>
-        )}
-      </main>
-    </div>
+          </header>
+
+          {/* Controls */}
+          <Controls />
+
+          {/* Main Game Body */}
+          <main className="game-body" style={{ position: 'relative' }}>
+            {/* Pause Overlay */}
+            {isPaused && (
+              <div className="pause-overlay">
+                <h2>⏸ Paused</h2>
+                <button className="btn-primary" onClick={resumeGame}>▶ Resume</button>
+              </div>
+            )}
+
+            <Board />
+            <NumberPad />
+          </main>
+
+          {/* Footer */}
+          <footer className="game-footer">
+            {isSolving ? (
+              <div className="solving-indicator">
+                <span className="solving-dot" />
+                <span className="solving-dot" style={{ animationDelay: '0.2s' }} />
+                <span className="solving-dot" style={{ animationDelay: '0.4s' }} />
+                Auto-solving…
+              </div>
+            ) : (
+              <span>Arrows to navigate · N to toggle notes · Ctrl+Z undo</span>
+            )}
+
+          </footer>
+        </div>
+      </div>
+
+      {/* Victory Modal */}
+      <VictoryModal />
+    </>
   );
 }
 
